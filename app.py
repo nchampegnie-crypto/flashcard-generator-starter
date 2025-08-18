@@ -7,57 +7,22 @@ from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
-# --------------------- ICONS (vector, print-safe) ---------------------
+# Optional deps
+try:
+    import pdfplumber
+except Exception:
+    pdfplumber = None
+
+import requests
+
+# ---------------- Minimal visual (optional): initials badge only ----------------
 def icon_badge(c, cx, cy, txt="A", scale=1.0):
     r = 16*scale
-    c.setFillColor(colors.lightblue); c.circle(cx, cy, r, stroke=0, fill=1)
-    c.setFillColor(colors.darkblue); c.setFont("Helvetica-Bold", 14*scale)
+    c.setFillColor(colors.lightgrey); c.circle(cx, cy, r, stroke=0, fill=1)
+    c.setFillColor(colors.black); c.setFont("Helvetica-Bold", 14*scale)
     c.drawCentredString(cx, cy-5*scale, txt[:2].upper())
 
-def icon_eyes(c, cx, cy, scale=1.0):
-    c.setFillColor(colors.white); c.setStrokeColor(colors.black)
-    w=18*scale; h=12*scale
-    c.ellipse(cx-w-2, cy-h/2, cx-2, cy+h/2, stroke=1, fill=1)
-    c.ellipse(cx+2, cy-h/2, cx+w+2, cy+h/2, stroke=1, fill=1)
-    c.setFillColor(colors.darkblue)
-    c.circle(cx-w/2-2, cy, 4*scale, stroke=0, fill=1)
-    c.circle(cx+w/2+2, cy, 4*scale, stroke=0, fill=1)
-
-def icon_ruler(c, cx, cy, scale=1.0):
-    w=60*scale; h=12*scale
-    c.setFillColor(colors.goldenrod); c.setStrokeColor(colors.saddlebrown)
-    c.rect(cx-w/2, cy-h/2, w, h, stroke=1, fill=1)
-    for i in range(13):
-        x = cx - w/2 + i*w/12.0
-        tick = 6*scale if i%2==0 else 3*scale
-        c.line(x, cy+h/2, x, cy+h/2 - tick)
-
-def icon_lightbulb(c, cx, cy, scale=1.0):
-    c.setFillColor(colors.yellow); c.setStrokeColor(colors.orange)
-    c.circle(cx, cy+10*scale, 14*scale, stroke=1, fill=1)
-    c.setFillColor(colors.orange); c.rect(cx-8*scale, cy-8*scale, 16*scale, 10*scale, stroke=0, fill=1)
-
-def icon_magnifier(c, cx, cy, scale=1.0):
-    r=14*scale
-    c.setFillColor(colors.lightblue); c.setStrokeColor(colors.darkblue)
-    c.circle(cx, cy, r, stroke=1, fill=1)
-    c.line(cx+r*0.7, cy-r*0.7, cx+r*2.0, cy-r*2.0)
-
-ICON_MAP = {
-    "observe": icon_eyes,
-    "measure": icon_ruler,
-    "infer": icon_lightbulb,
-    "investigate": icon_magnifier,
-}
-
-def pick_icon(term):
-    key = term.lower()
-    for k, fn in ICON_MAP.items():
-        if k in key:
-            return fn
-    return lambda c, x, y, s=1.0: icon_badge(c, x, y, txt=term[:2], scale=s)
-
-# --------------------- LAYOUT CONSTANTS ---------------------
+# ---------------- Layout constants ----------------
 PAGE = letter
 COLS, ROWS = 2, 4
 CARD_W, CARD_H = PAGE[0]/COLS, PAGE[1]/ROWS
@@ -69,9 +34,18 @@ def draw_cut_grid(c):
     for j in range(1, ROWS): c.line(0, j*CARD_H, PAGE[0], j*CARD_H)
     c.setDash()
 
-def draw_index(c, idx, xc, yc, lesson: Optional[str]):
+def compose_marker(idx:int, subject:Optional[str], lesson:Optional[str]) -> str:
+    parts = []
+    if subject: parts.append(str(subject).strip())
+    if lesson: parts.append(f"L{str(lesson).strip()}")
+    parts.append(f"#{idx+1}")
+    return " ".join(parts)
+
+def draw_index(c, idx, xc, yc, subject: Optional[str], lesson: Optional[str], show_marker: bool):
+    if not show_marker:
+        return
     c.setFont("Helvetica", 7); c.setFillColor(colors.grey)
-    tag = f"L{lesson}-#{idx+1}" if lesson else f"#{idx+1}"
+    tag = compose_marker(idx, subject, lesson)
     c.drawRightString(xc + CARD_W/2 - 6, yc - CARD_H/2 + 8, tag)
 
 def wrap(text, max_w, fnt="Helvetica", size=11):
@@ -81,38 +55,61 @@ def wrap(text, max_w, fnt="Helvetica", size=11):
         if stringWidth(t, fnt, size) <= max_w:
             cur=t
         else:
-            lines.append(cur); cur=w
+            if cur: lines.append(cur)
+            cur=w
     if cur: lines.append(cur)
     return lines
 
-# --------------------- PDF BUILDERS ---------------------
-def layout_front(c, batch, start_index, spelling_mode=False, include_lessons=True):
+# ---------------- PDF builders ----------------
+def layout_front(c, batch, start_index, visuals_mode="None", show_marker=True,
+                 subject=None, lesson=None, show_subtext=False, subtext_tmpl=""):
     for i, item in enumerate(batch):
         idx = start_index + i
         col = i % COLS; row = (i // COLS) % ROWS
         xc = col*CARD_W + CARD_W/2
         yc = PAGE[1] - (row*CARD_H + CARD_H/2)
-        term, definition, lesson = item
-        pick_icon(term)(c, xc, yc+10, 1.0)
+        term, definition, _ = item
+
+        # Visuals (optional): None (default) or Initials badge
+        if visuals_mode == "Initials badge":
+            icon_badge(c, xc, yc+12, term[:2], 1.0)
+
+        # Term text
         c.setFont("Helvetica-Bold", 13); c.setFillColor(colors.black)
-        c.drawCentredString(xc, yc-25, term)
-        draw_index(c, idx, xc, yc, lesson if include_lessons else None)
+        c.drawCentredString(xc, yc-18, term)
+
+        # Optional subtext under the term
+        if show_subtext and (subtext_tmpl.strip() or subject or lesson):
+            sub = (subtext_tmpl or "{subject} • Lesson {lesson}").format(
+                subject=subject or "", lesson=lesson or "", index=idx+1
+            ).strip(" •")
+            c.setFont("Helvetica", 9); c.setFillColor(colors.grey)
+            c.drawCentredString(xc, yc-32, sub)
+
+        # Marker in corner
+        draw_index(c, idx, xc, yc, subject, lesson, show_marker)
+
     draw_cut_grid(c)
 
 def layout_back(c, batch, start_index, long_edge=True, offset_mm=(0,0),
-                spelling_mode=False, include_lessons=True):
-    ox = offset_mm[0] * 2.83465; oy = offset_mm[1] * 2.83465  # mm -> pt
+                spelling_mode=False, show_marker=True,
+                subject=None, lesson=None, show_subtext_on_back=False, subtext_tmpl=""):
+    # offsets (mm -> pt)
+    ox = offset_mm[0] * 2.83465; oy = offset_mm[1] * 2.83465
     c.saveState(); c.translate(ox, oy)
     rotate180 = not long_edge
     if rotate180:
         c.translate(PAGE[0], PAGE[1]); c.rotate(180)
+
     for i, item in enumerate(batch):
-        term, definition, lesson = item
+        term, definition, _ = item
         col = i % COLS; row = (i // COLS) % ROWS
-        if long_edge: col = (COLS-1) - col
+        if long_edge: col = (COLS-1) - col  # mirror columns
         xc = col*CARD_W + CARD_W/2
         yc = PAGE[1] - (row*CARD_H + CARD_H/2)
+
         if spelling_mode or not definition:
+            # three writing baselines
             c.setStrokeColor(colors.black)
             for j in range(3):
                 y = yc - 6 + j*12
@@ -123,32 +120,51 @@ def layout_back(c, batch, start_index, long_edge=True, offset_mm=(0,0),
             y_text = yc + (len(lines)*6)
             for line in lines:
                 c.drawCentredString(xc, y_text, line); y_text -= 14
-        idx = start_index + i
-        draw_index(c, idx, xc, yc, lesson if include_lessons else None)
+
+        # Optional subtext on back
+        if show_subtext_on_back and (subtext_tmpl.strip() or subject or lesson):
+            sub = (subtext_tmpl or "{subject} • Lesson {lesson}").format(
+                subject=subject or "", lesson=lesson or "", index=start_index + i + 1
+            ).strip(" •")
+            c.setFont("Helvetica", 8); c.setFillColor(colors.grey)
+            c.drawCentredString(xc, yc - CARD_H/2 + 16, sub)
+
+        # Corner marker
+        draw_index(c, start_index + i, xc, yc, subject, lesson, show_marker)
+
     draw_cut_grid(c); c.restoreState()
 
 def build_pdf(pairs, title="Flashcards", long_edge=True, offset_mm=(0,0),
-              include_lessons=True, spelling_mode=False,
-              sample_n=None, only_first_sheet=False) -> bytes:
-    if sample_n:
-        pairs = pairs[:sample_n]
+              show_marker=True, spelling_mode=False,
+              sample_n=None, only_first_sheet=False, visuals_mode="None",
+              subject=None, lesson=None, show_subtext=False, subtext_tmpl="",
+              show_subtext_on_back=False) -> bytes:
+    if sample_n: pairs = pairs[:sample_n]
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=PAGE)
     start = 0; sheet = 1
     while start < len(pairs):
         batch = pairs[start:start+CHUNK]
+        # FRONT
         c.setFont("Helvetica", 8); c.setFillColor(colors.grey)
         c.drawString(20, PAGE[1]-12, f"Sheet {sheet} FRONT ({'Long-edge' if long_edge else 'Short-edge'})")
-        layout_front(c, batch, start, spelling_mode, include_lessons); c.showPage()
+        layout_front(c, batch, start, visuals_mode=visuals_mode,
+                     show_marker=show_marker, subject=subject, lesson=lesson,
+                     show_subtext=show_subtext, subtext_tmpl=subtext_tmpl)
+        c.showPage()
+        # BACK
         c.setFont("Helvetica", 8); c.setFillColor(colors.grey)
         c.drawString(20, PAGE[1]-12, f"Sheet {sheet} BACK")
-        layout_back(c, batch, start, long_edge, offset_mm, spelling_mode, include_lessons); c.showPage()
+        layout_back(c, batch, start, long_edge, offset_mm, spelling_mode,
+                    show_marker=show_marker, subject=subject, lesson=lesson,
+                    show_subtext_on_back=show_subtext_on_back, subtext_tmpl=subtext_tmpl)
+        c.showPage()
         if only_first_sheet: break
         start += CHUNK; sheet += 1
     c.save()
     return buf.getvalue()
 
-# --------------------- PARSING ---------------------
+# ---------------- Parsing ----------------
 def parse_text_to_pairs(txt: str, mode: str):
     pairs=[]
     for raw in txt.strip().splitlines():
@@ -166,7 +182,48 @@ def parse_text_to_pairs(txt: str, mode: str):
             pairs.append((line, "", None))
     return pairs
 
-# --------------------- STREAMLIT UI ---------------------
+# ---------------- OCR helpers ----------------
+OCR_SPACE_ENDPOINT = "https://api.ocr.space/parse/image"
+
+def ocr_space_extract(file_bytes: bytes, is_pdf=False, api_key: Optional[str]=None) -> Optional[str]:
+    key = api_key or "helloworld"  # demo key
+    files = {"file": ("upload.pdf" if is_pdf else "upload.png", file_bytes)}
+    data = {
+        "language": "eng",
+        "isOverlayRequired": "false",
+        "OCREngine": "2",
+        "scale": "true",
+        "detectOrientation": "true"
+    }
+    try:
+        resp = requests.post(OCR_SPACE_ENDPOINT, files=files, data=data, headers={"apikey": key}, timeout=30)
+        resp.raise_for_status()
+        js = resp.json()
+        if js.get("IsErroredOnProcessing"):
+            return None
+        results = js.get("ParsedResults") or []
+        texts = [r.get("ParsedText","") for r in results if r]
+        out = "\n".join(texts).strip()
+        return out or None
+    except Exception:
+        return None
+
+def pdf_text_extract(file_bytes: bytes) -> Optional[str]:
+    if not pdfplumber:
+        return None
+    try:
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            chunks = []
+            for page in pdf.pages:
+                t = page.extract_text() or ""
+                if t.strip():
+                    chunks.append(t)
+            final = "\n".join(chunks).strip()
+            return final or None
+    except Exception:
+        return None
+
+# ---------------- UI ----------------
 st.set_page_config(page_title="8-Up Flashcard PDF Generator", page_icon="🧠", layout="centered")
 st.title("8-Up Flashcard PDF Generator")
 
@@ -177,14 +234,48 @@ with st.sidebar:
     long_edge = duplex.startswith("Long")
     offx = st.number_input("Offset X (mm)", value=0.0, step=0.5, help="Positive = shift backs RIGHT")
     offy = st.number_input("Offset Y (mm)", value=0.0, step=0.5, help="Positive = shift backs UP")
-    include_lessons = st.checkbox("Show L{lesson}-# markers", value=True)
-    sample = st.checkbox("Sample (first 3 cards only)", value=False)
-    first_sheet = st.checkbox("Generate only first sheet", value=False)
+    show_marker = st.checkbox("Show corner marker", value=True, help="Shows subject/lesson/index in the card corner")
+    st.markdown("---")
+    st.subheader("Subject / Lesson")
+    subject = st.text_input("Subject (optional)", value="", placeholder="e.g., Science or ELA")
+    lesson = st.text_input("Lesson (optional)", value="", placeholder="e.g., Unit 2, Lesson 4")
+    show_subtext = st.checkbox("Show subtext under term (FRONT)", value=True)
+    subtext_tmpl = st.text_input("Subtext template", value="{subject} • Lesson {lesson}", help="Use {subject}, {lesson}, {index}")
+    show_subtext_on_back = st.checkbox("Also show subtext on BACK", value=False)
+    st.markdown("---")
+    st.caption("OCR (for screenshots/PDF scans)")
+    ocr_engine = st.radio("OCR method", ["OCR.space (recommended)", "PDF text only"], index=0)
+    ocr_api_key = st.text_input("OCR.space API key (optional)", type="password", help="Leave blank to use demo key")
+    st.markdown("---")
+    visuals_mode = st.selectbox("Front visuals", ["None", "Initials badge"], index=0)
 
-st.write("Paste your list below. For **terms mode**, use `term — definition` (em dash) or `term - definition` per line. For **spelling mode**, enter one word per line.")
+st.write("Choose **Paste text** or **Upload screenshot/PDF**. Edit the extracted text if needed, then generate.")
 
-default_example = "Observe — to use your senses to learn about things.\nMeasure — to find the size or amount of something.\nInfer — to use what you know to answer a question."
-text = st.text_area("Your list:", value=default_example, height=180)
+tab1, tab2 = st.tabs(["Paste text", "Upload screenshot/PDF"])
+
+with tab1:
+    default_example = "Observe — to use your senses to learn about things.\nMeasure — to find the size or amount of something.\nInvestigate — plan and do a test to answer a question."
+    text_input_area = st.text_area("Your list:", value=default_example, height=220, key="manual_text")
+
+with tab2:
+    up = st.file_uploader("Upload image or PDF (screenshot, photo, or PDF)", type=["png", "jpg", "jpeg", "pdf"])
+    extracted = ""
+    if up is not None:
+        file_bytes = up.read()
+        if up.type == "application/pdf" or up.name.lower().endswith(".pdf"):
+            if ocr_engine.startswith("PDF text only"):
+                extracted = pdf_text_extract(file_bytes) or ""
+            else:
+                extracted = ocr_space_extract(file_bytes, is_pdf=True, api_key=ocr_api_key) or ""
+        else:
+            # image
+            if ocr_engine.startswith("OCR.space"):
+                extracted = ocr_space_extract(file_bytes, is_pdf=False, api_key=ocr_api_key) or ""
+            else:
+                extracted = ""  # no local OCR in this minimal build
+        if not extracted:
+            st.warning("I couldn't read text from that file. Try a clearer photo, or switch OCR method.")
+        st.text_area("Extracted text (you can edit before generating):", value=extracted, height=220, key="extracted_text")
 
 colA, colB = st.columns(2)
 with colA:
@@ -194,16 +285,23 @@ with colB:
     st.text_input("Filename hint", value=filename_hint, disabled=True)
 
 if st.button("Generate PDF", type="primary"):
-    pairs = parse_text_to_pairs(text, "terms" if mode.startswith("terms") else "spelling")
+    # decide which text to parse
+    src_text = st.session_state.get("extracted_text") or st.session_state.get("manual_text") or ""
+    pairs = parse_text_to_pairs(src_text, "terms" if mode.startswith("terms") else "spelling")
     if not pairs:
-        st.error("I couldn’t find any items. Enter at least one line.")
+        st.error("I couldn’t find any items. Enter or extract at least one line.")
     else:
         pdf_bytes = build_pdf(
             pairs=pairs, title=title, long_edge=long_edge,
-            offset_mm=(offx, offy), include_lessons=include_lessons,
+            offset_mm=(offx, offy), show_marker=show_marker,
             spelling_mode=(mode.startswith("spelling")),
-            sample_n=3 if sample else None,
-            only_first_sheet=first_sheet
+            sample_n=3 if False else None,  # keep full unless you add paywall
+            only_first_sheet=False,
+            visuals_mode=visuals_mode,
+            subject=subject.strip() or None,
+            lesson=lesson.strip() or None,
+            show_subtext=show_subtext, subtext_tmpl=subtext_tmpl,
+            show_subtext_on_back=show_subtext_on_back
         )
         st.success("PDF ready!")
         st.download_button(
@@ -213,4 +311,4 @@ if st.button("Generate PDF", type="primary"):
             mime="application/pdf",
         )
 
-st.markdown("— Made for parents & teachers. 8-up, perfectly aligned, duplex-ready.")
+st.markdown("— Duplex-ready (mirror backs for long-edge). Use offsets if your printer drifts.")
