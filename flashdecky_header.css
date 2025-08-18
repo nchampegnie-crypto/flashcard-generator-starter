@@ -7,3 +7,41 @@ section.main .block-container,
 .block-container { padding-top: 1.75rem; }
 .fd-header-space { height: 6px; } /* prevent logo clipping */
 .footer-cta { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #eee; padding: 10px 0; z-index: 999; margin-top: 12px; }
+
+/* ---- v3.1.3: readable text on white ---- */
+:root { --brand-text: #111827; }
+
+/* App & sidebar default text color */
+[data-testid="stAppViewContainer"], [data-testid="stSidebar"] {
+  color: var(--brand-text) !important;
+}
+
+/* Headings and all markdown text */
+h1, h2, h3, h4, h5, h6,
+[data-testid="stMarkdownContainer"],
+[data-testid="stMarkdownContainer"] * {
+  color: var(--brand-text) !important;
+  opacity: 1 !important;
+}
+
+/* Labels, expander headers, and widget text */
+label, .st-expanderHeader, .stRadio, .stSelectbox, .stTextInput, .stTextArea, .stFileUploader {
+  color: var(--brand-text) !important;
+}
+
+/* Inputs / textareas actual typed content */
+textarea, input, [role="combobox"] {
+  color: var(--brand-text) !important;
+}
+
+/* Sidebar entries (progress list) */
+[data-testid="stSidebar"] * {
+  color: var(--brand-text) !important;
+  opacity: 1 !important;
+}
+
+/* Muted helper text that's still readable */
+.stCaption, .stMarkdown small, small, .help {
+  color: #4B5563 !important;
+  opacity: 1 !important;
+}
