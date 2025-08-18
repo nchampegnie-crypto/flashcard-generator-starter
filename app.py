@@ -1,13 +1,12 @@
 
-import io, textwrap
-from typing import List, Tuple, Optional
+import io, re, textwrap
+from typing import Optional
 import streamlit as st
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
-# Optional deps
 try:
     import pdfplumber
 except Exception:
@@ -37,7 +36,7 @@ def draw_cut_grid(c):
 def compose_marker(idx:int, subject:Optional[str], lesson:Optional[str]) -> str:
     parts = []
     if subject: parts.append(str(subject).strip())
-    if lesson: parts.append(f"L{str(lesson).strip()}")
+    if lesson: parts.append(str(lesson).strip())   # removed 'L' prefix
     parts.append(f"#{idx+1}")
     return " ".join(parts)
 
@@ -48,15 +47,16 @@ def draw_index(c, idx, xc, yc, subject: Optional[str], lesson: Optional[str], sh
     tag = compose_marker(idx, subject, lesson)
     c.drawRightString(xc + CARD_W/2 - 6, yc - CARD_H/2 + 8, tag)
 
-def wrap(text, max_w, fnt="Helvetica", size=11):
-    words = text.split(); lines=[]; cur=""
+def wrap_lines(text, max_w, fnt="Helvetica", size=11):
+    words = text.split()
+    lines, cur = [], ""
     for w in words:
-        t=(cur+" "+w).strip()
-        if stringWidth(t, fnt, size) <= max_w:
-            cur=t
+        cand = (cur + " " + w).strip()
+        if stringWidth(cand, fnt, size) <= max_w:
+            cur = cand
         else:
             if cur: lines.append(cur)
-            cur=w
+            cur = w
     if cur: lines.append(cur)
     return lines
 
@@ -70,31 +70,26 @@ def layout_front(c, batch, start_index, visuals_mode="None", show_marker=True,
         yc = PAGE[1] - (row*CARD_H + CARD_H/2)
         term, definition, _ = item
 
-        # Visuals (optional): None (default) or Initials badge
         if visuals_mode == "Initials badge":
             icon_badge(c, xc, yc+12, term[:2], 1.0)
 
-        # Term text
         c.setFont("Helvetica-Bold", 13); c.setFillColor(colors.black)
         c.drawCentredString(xc, yc-18, term)
 
         # Optional subtext under the term
         if show_subtext and (subtext_tmpl.strip() or subject or lesson):
-            sub = (subtext_tmpl or "{subject} • Lesson {lesson}").format(
+            sub = (subtext_tmpl or "{subject} • {lesson}").format(
                 subject=subject or "", lesson=lesson or "", index=idx+1
             ).strip(" •")
             c.setFont("Helvetica", 9); c.setFillColor(colors.grey)
             c.drawCentredString(xc, yc-32, sub)
 
-        # Marker in corner
         draw_index(c, idx, xc, yc, subject, lesson, show_marker)
-
     draw_cut_grid(c)
 
 def layout_back(c, batch, start_index, long_edge=True, offset_mm=(0,0),
                 spelling_mode=False, show_marker=True,
                 subject=None, lesson=None, show_subtext_on_back=False, subtext_tmpl=""):
-    # offsets (mm -> pt)
     ox = offset_mm[0] * 2.83465; oy = offset_mm[1] * 2.83465
     c.saveState(); c.translate(ox, oy)
     rotate180 = not long_edge
@@ -104,34 +99,33 @@ def layout_back(c, batch, start_index, long_edge=True, offset_mm=(0,0),
     for i, item in enumerate(batch):
         term, definition, _ = item
         col = i % COLS; row = (i // COLS) % ROWS
-        if long_edge: col = (COLS-1) - col  # mirror columns
+        if long_edge: col = (COLS-1) - col
         xc = col*CARD_W + CARD_W/2
         yc = PAGE[1] - (row*CARD_H + CARD_H/2)
 
         if spelling_mode or not definition:
-            # three writing baselines
             c.setStrokeColor(colors.black)
             for j in range(3):
                 y = yc - 6 + j*12
                 c.line(xc - CARD_W/2 + 10, y, xc + CARD_W/2 - 10, y)
         else:
-            lines = wrap(definition, CARD_W-20, "Helvetica", 11)
+            lines = wrap_lines(definition, CARD_W-24, "Helvetica", 11)
             c.setFont("Helvetica", 11); c.setFillColor(colors.black)
-            y_text = yc + (len(lines)*6)
+            # vertically center block
+            start_y = yc + (len(lines)-1)*7
+            y = start_y
             for line in lines:
-                c.drawCentredString(xc, y_text, line); y_text -= 14
+                c.drawCentredString(xc, y, line)
+                y -= 14
 
-        # Optional subtext on back
         if show_subtext_on_back and (subtext_tmpl.strip() or subject or lesson):
-            sub = (subtext_tmpl or "{subject} • Lesson {lesson}").format(
+            sub = (subtext_tmpl or "{subject} • {lesson}").format(
                 subject=subject or "", lesson=lesson or "", index=start_index + i + 1
             ).strip(" •")
             c.setFont("Helvetica", 8); c.setFillColor(colors.grey)
             c.drawCentredString(xc, yc - CARD_H/2 + 16, sub)
 
-        # Corner marker
         draw_index(c, start_index + i, xc, yc, subject, lesson, show_marker)
-
     draw_cut_grid(c); c.restoreState()
 
 def build_pdf(pairs, title="Flashcards", long_edge=True, offset_mm=(0,0),
@@ -145,14 +139,12 @@ def build_pdf(pairs, title="Flashcards", long_edge=True, offset_mm=(0,0),
     start = 0; sheet = 1
     while start < len(pairs):
         batch = pairs[start:start+CHUNK]
-        # FRONT
         c.setFont("Helvetica", 8); c.setFillColor(colors.grey)
         c.drawString(20, PAGE[1]-12, f"Sheet {sheet} FRONT ({'Long-edge' if long_edge else 'Short-edge'})")
         layout_front(c, batch, start, visuals_mode=visuals_mode,
                      show_marker=show_marker, subject=subject, lesson=lesson,
                      show_subtext=show_subtext, subtext_tmpl=subtext_tmpl)
         c.showPage()
-        # BACK
         c.setFont("Helvetica", 8); c.setFillColor(colors.grey)
         c.drawString(20, PAGE[1]-12, f"Sheet {sheet} BACK")
         layout_back(c, batch, start, long_edge, offset_mm, spelling_mode,
@@ -164,20 +156,34 @@ def build_pdf(pairs, title="Flashcards", long_edge=True, offset_mm=(0,0),
     c.save()
     return buf.getvalue()
 
-# ---------------- Parsing ----------------
+# ---------------- Robust parsing ----------------
+SEP_PATTERN = re.compile(
+    r"""^\s*                          # start
+        (?:\d+[\.\)]\s*)?             # optional leading '1.' or '1)' numbering
+        (?:[\-\u2022]\s*)?            # optional bullet '- ' or '• '
+        (?P<term>.+?)                  # the term (minimal)
+        \s*(?:[-\u2013\u2014:])\s+     # a separator: hyphen, en dash, em dash, or colon
+        (?P<def>.+)                    # the definition (greedy to end)
+        \s*$                           # end
+    """,
+    re.VERBOSE
+)
+
 def parse_text_to_pairs(txt: str, mode: str):
     pairs=[]
     for raw in txt.strip().splitlines():
-        line = raw.strip().strip("•-—").strip()
-        if not line: continue
+        line = raw.strip()
+        if not line: 
+            continue
         if mode=="terms":
-            if "—" in line: term, definition = line.split("—",1)
-            elif " - " in line: term, definition = line.split(" - ",1)
-            elif "-" in line and len(line.split("-",1)[0].split())<=3:
-                term, definition = line.split("-",1)
+            m = SEP_PATTERN.match(line)
+            if m:
+                term = m.group("term").strip()
+                definition = m.group("def").strip()
+                pairs.append((term, definition, None))
             else:
-                term, definition = line, ""
-            pairs.append((term.strip(), definition.strip(), None))
+                # fallback: treat whole line as term (no def)
+                pairs.append((line, "", None))
         else:
             pairs.append((line, "", None))
     return pairs
@@ -186,15 +192,9 @@ def parse_text_to_pairs(txt: str, mode: str):
 OCR_SPACE_ENDPOINT = "https://api.ocr.space/parse/image"
 
 def ocr_space_extract(file_bytes: bytes, is_pdf=False, api_key: Optional[str]=None) -> Optional[str]:
-    key = api_key or "helloworld"  # demo key
+    key = api_key or "helloworld"
     files = {"file": ("upload.pdf" if is_pdf else "upload.png", file_bytes)}
-    data = {
-        "language": "eng",
-        "isOverlayRequired": "false",
-        "OCREngine": "2",
-        "scale": "true",
-        "detectOrientation": "true"
-    }
+    data = {"language":"eng","isOverlayRequired":"false","OCREngine":"2","scale":"true","detectOrientation":"true"}
     try:
         resp = requests.post(OCR_SPACE_ENDPOINT, files=files, data=data, headers={"apikey": key}, timeout=30)
         resp.raise_for_status()
@@ -234,13 +234,13 @@ with st.sidebar:
     long_edge = duplex.startswith("Long")
     offx = st.number_input("Offset X (mm)", value=0.0, step=0.5, help="Positive = shift backs RIGHT")
     offy = st.number_input("Offset Y (mm)", value=0.0, step=0.5, help="Positive = shift backs UP")
-    show_marker = st.checkbox("Show corner marker", value=True, help="Shows subject/lesson/index in the card corner")
+    show_marker = st.checkbox("Show corner marker", value=True)
     st.markdown("---")
     st.subheader("Subject / Lesson")
     subject = st.text_input("Subject (optional)", value="", placeholder="e.g., Science or ELA")
-    lesson = st.text_input("Lesson (optional)", value="", placeholder="e.g., Unit 2, Lesson 4")
-    show_subtext = st.checkbox("Show subtext under term (FRONT)", value=True)
-    subtext_tmpl = st.text_input("Subtext template", value="{subject} • Lesson {lesson}", help="Use {subject}, {lesson}, {index}")
+    lesson = st.text_input("Lesson (optional)", value="", placeholder="e.g., Unit 1-4")
+    show_subtext = st.checkbox("Show subtext under term (FRONT)", value=False)  # default OFF now
+    subtext_tmpl = st.text_input("Subtext template", value="{subject} • {lesson}", help="Use {subject}, {lesson}, {index}")
     show_subtext_on_back = st.checkbox("Also show subtext on BACK", value=False)
     st.markdown("---")
     st.caption("OCR (for screenshots/PDF scans)")
@@ -249,12 +249,12 @@ with st.sidebar:
     st.markdown("---")
     visuals_mode = st.selectbox("Front visuals", ["None", "Initials badge"], index=0)
 
-st.write("Choose **Paste text** or **Upload screenshot/PDF**. Edit the extracted text if needed, then generate.")
+st.write("Paste or upload your list. For **terms mode**, separators like '-', '–', '—', or ':' are supported.\nExamples: `munch - to chew...`, `Brain — control center...`, `1) heart: pumps blood`.")
 
 tab1, tab2 = st.tabs(["Paste text", "Upload screenshot/PDF"])
 
 with tab1:
-    default_example = "Observe — to use your senses to learn about things.\nMeasure — to find the size or amount of something.\nInvestigate — plan and do a test to answer a question."
+    default_example = "munch - to chew food loudly and completely\nbellowed - to have shouted in a loud deep voice\nrough - when you do something in a way that is not gentle."
     text_input_area = st.text_area("Your list:", value=default_example, height=220, key="manual_text")
 
 with tab2:
@@ -268,11 +268,10 @@ with tab2:
             else:
                 extracted = ocr_space_extract(file_bytes, is_pdf=True, api_key=ocr_api_key) or ""
         else:
-            # image
             if ocr_engine.startswith("OCR.space"):
                 extracted = ocr_space_extract(file_bytes, is_pdf=False, api_key=ocr_api_key) or ""
             else:
-                extracted = ""  # no local OCR in this minimal build
+                extracted = ""
         if not extracted:
             st.warning("I couldn't read text from that file. Try a clearer photo, or switch OCR method.")
         st.text_area("Extracted text (you can edit before generating):", value=extracted, height=220, key="extracted_text")
@@ -285,7 +284,6 @@ with colB:
     st.text_input("Filename hint", value=filename_hint, disabled=True)
 
 if st.button("Generate PDF", type="primary"):
-    # decide which text to parse
     src_text = st.session_state.get("extracted_text") or st.session_state.get("manual_text") or ""
     pairs = parse_text_to_pairs(src_text, "terms" if mode.startswith("terms") else "spelling")
     if not pairs:
@@ -295,8 +293,7 @@ if st.button("Generate PDF", type="primary"):
             pairs=pairs, title=title, long_edge=long_edge,
             offset_mm=(offx, offy), show_marker=show_marker,
             spelling_mode=(mode.startswith("spelling")),
-            sample_n=3 if False else None,  # keep full unless you add paywall
-            only_first_sheet=False,
+            sample_n=None, only_first_sheet=False,
             visuals_mode=visuals_mode,
             subject=subject.strip() or None,
             lesson=lesson.strip() or None,
