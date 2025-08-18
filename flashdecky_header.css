@@ -1,86 +1,24 @@
 
-:root { --brand-indigo:#6C63FF; --brand-gold:#FFB703; --brand-text:#111827; --brand-bg:#FFFFFF; }
-[data-testid="stAppViewContainer"],
-section.main .block-container,
-[data-testid="stHeader"],
-[data-testid="stSidebar"] { background:#FFFFFF !important; }
-.block-container { padding-top: 1.75rem; }
-.fd-header-space { height: 6px; } /* prevent logo clipping */
-.footer-cta { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #eee; padding: 10px 0; z-index: 999; margin-top: 12px; }
-
-/* ---- v3.1.3: readable text on white ---- */
-:root { --brand-text: #111827; }
-
-/* App & sidebar default text color */
-[data-testid="stAppViewContainer"], [data-testid="stSidebar"] {
-  color: var(--brand-text) !important;
+:root{ --brand-indigo:#6C63FF; --brand-gold:#FFB703; --brand-text:#111827; --brand-bg:#FFFFFF; }
+[data-testid="stAppViewContainer"], [data-testid="stSidebar"]{ background:#FFFFFF !important; color:#111827 !important; }
+h1,h2,h3,h4,h5,h6, [data-testid="stMarkdownContainer"] *{ color:#111827 !important; }
+.block-container{padding-top:1.25rem;}
+/* Light inputs */
+[data-testid="stTextInput"]>div>div, [data-baseweb="input"], [data-testid="stTextArea"]>div{
+  background:#FFFFFF !important; border:1px solid #E5E7EB !important; border-radius:10px !important;
 }
-
-/* Headings and all markdown text */
-h1, h2, h3, h4, h5, h6,
-[data-testid="stMarkdownContainer"],
-[data-testid="stMarkdownContainer"] * {
-  color: var(--brand-text) !important;
-  opacity: 1 !important;
+[data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea, [data-baseweb="input"] input{
+  background:#F9FAFB !important; color:#111827 !important;
 }
-
-/* Labels, expander headers, and widget text */
-label, .st-expanderHeader, .stRadio, .stSelectbox, .stTextInput, .stTextArea, .stFileUploader {
-  color: var(--brand-text) !important;
+textarea:focus,input:focus,[data-baseweb="input"] input:focus{
+  outline:none !important;border-color:#6C63FF !important; box-shadow:0 0 0 3px rgba(108,99,255,.12) !important;
 }
-
-/* Inputs / textareas actual typed content */
-textarea, input, [role="combobox"] {
-  color: var(--brand-text) !important;
+::placeholder{color:#6B7280 !important;opacity:1 !important;}
+/* File uploader light */
+[data-testid="stFileUploader"]{color:#111827 !important;}
+[data-testid="stFileUploaderDropzone"], [data-testid="stFileUploader"] section[data-testid="stFileUploaderDropzone"]{
+  background:#FFFFFF !important;border:1px solid #E5E7EB !important;border-radius:12px !important;
 }
-
-/* Sidebar entries (progress list) */
-[data-testid="stSidebar"] * {
-  color: var(--brand-text) !important;
-  opacity: 1 !important;
-}
-
-/* Muted helper text that's still readable */
-.stCaption, .stMarkdown small, small, .help {
-  color: #4B5563 !important;
-  opacity: 1 !important;
-}
-
-/* ---- v3.1.4: light input fields ---- */
-
-/* Text inputs */
-[data-testid="stTextInput"] > div > div,
-[data-baseweb="input"] {
-  background: #FFFFFF !important;
-  border: 1px solid #E5E7EB !important;
-  border-radius: 10px !important;
-}
-[data-testid="stTextInput"] input,
-[data-baseweb="input"] input {
-  background: #F9FAFB !important;
-  color: #111827 !important;
-}
-
-/* Textareas */
-[data-testid="stTextArea"] > div {
-  background: #FFFFFF !important;
-  border: 1px solid #E5E7EB !important;
-  border-radius: 10px !important;
-}
-[data-testid="stTextArea"] textarea {
-  background: #F9FAFB !important;
-  color: #111827 !important;
-}
-
-/* File uploader label text (ensure readable) */
-[data-testid="stFileUploader"] * { color: #111827 !important; }
-
-/* Focus ring */
-textarea:focus, input:focus, [data-baseweb="input"] input:focus {
-  outline: none !important;
-  border-color: #6C63FF !important;
-  box-shadow: 0 0 0 3px rgba(108, 99, 255, 0.12) !important;
-}
-
-/* Placeholder color */
-::placeholder { color: #6B7280 !important; opacity: 1 !important; }
+[data-testid="stFileUploaderDropzone"] *{color:#111827 !important;opacity:1 !important;}
+[data-testid="stFileUploader"] button{ background:#FFFFFF !important;color:#111827 !important;border:1px solid #E5E7EB !important;border-radius:10px !important;}
+[data-testid="stFileUploader"] button:hover{background:#F3F4F6 !important;}

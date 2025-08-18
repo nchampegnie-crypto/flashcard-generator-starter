@@ -1,5 +1,7 @@
 streamlit
-reportlab
-pdfplumber
-requests
 pandas
+reportlab
+pdfminer.six
+requests
+openpyxl
+Pillow
