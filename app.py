@@ -11,7 +11,6 @@ st.set_page_config(page_title="FlashDecky", page_icon="⚡", layout="wide")
 with open("flashdecky_header.css","r") as f:
     st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
-# Header
 c1, c2 = st.columns([1,6])
 with c1: st.image("assets/icon.png", width=56)
 with c2: st.image("assets/wordmark.png", use_column_width=False)
@@ -19,46 +18,47 @@ st.markdown("---")
 
 with st.sidebar:
     st.header("Progress")
-    st.markdown("1) Upload/Paste\n\n2) Review and edit\n\n3) Download PDF")
+    st.markdown("1) Upload/Paste  \n2) Review and edit  \n3) Download PDF")
 
-# ---------- Robust parsing ----------
-START_RE = re.compile(r"(?mi)^\s*(?:\d+[\.\)]\s+|[-*•]\s+)")
+LIST_START_RE = re.compile(r"(?mi)^\s*(?:\d+[\.\)]\s+|[-*•]\s+)")
+HEADWORD_START_RE = re.compile(r"(?:(?<=^)|(?<=\n)|(?<=\)))\s*([A-Za-z][A-Za-z'’\-]+)(?=\s+(?:\(|\d+\.))")
 
 def split_blocks(text: str) -> List[str]:
     text = text.replace("\r\n","\n")
-    starts = [m.start() for m in START_RE.finditer(text)]
-    if not starts:
-        # fallback: split by blank line
-        return [blk.strip() for blk in re.split(r"\n\s*\n+", text) if blk.strip()]
-    blocks = []
-    for i, s in enumerate(starts):
-        e = starts[i+1] if i+1 < len(starts) else len(text)
-        blocks.append(text[s:e].strip())
-    return blocks
+    starts = [m.start() for m in LIST_START_RE.finditer(text)]
+    if starts:
+        blocks = []
+        for i, s in enumerate(starts):
+            e = starts[i+1] if i+1 < len(starts) else len(text)
+            blocks.append(text[s:e].strip())
+        return blocks
+    mlist = list(HEADWORD_START_RE.finditer(text))
+    if mlist:
+        idxs = [m.start(1) for m in mlist]
+        blocks = []
+        for i, s in enumerate(idxs):
+            e = idxs[i+1] if i+1 < len(idxs) else len(text)
+            blocks.append(text[s:e].strip())
+        return blocks
+    return [blk.strip() for blk in re.split(r"\n\s*\n+", text) if blk.strip()]
 
 def parse_term_def(block: str) -> Tuple[str,str]:
-    # collapse internal newlines into spaces
     cleaned = " ".join([ln.strip() for ln in block.splitlines() if ln.strip()])
-    # remove leading marker
-    cleaned = re.sub(r"^\s*(?:\d+[\.\)]\s+|[-*•]\s+)", "", cleaned).strip()
-    # try explicit separator - — – :
     m = re.match(r"^(?P<term>.+?)\s*(?:-|—|–|:)\s+(?P<def>.+)$", cleaned)
     if m:
         return m.group("term").strip(), m.group("def").strip()
-    # fallback: split by two+ spaces
-    m2 = re.match(r"^(\S+)\s+(.+)$", cleaned)
+    m2 = re.match(r"^\s*(?P<term>[A-Za-z][A-Za-z'’\-]+)\s+(?P<def>.+)$", cleaned, flags=re.S)
     if m2:
-        return m2.group(1).strip(), m2.group(2).strip()
-    return cleaned, ""
+        return m2.group("term").strip(), m2.group("def").strip()
+    parts = cleaned.split(None, 1)
+    if len(parts)==2:
+        return parts[0].strip(), parts[1].strip()
+    return cleaned.strip(), ""
 
 def parse_pairs_from_text(text: str) -> List[Tuple[str,str]]:
     blocks = split_blocks(text)
-    if not blocks:
-        lines = [l.strip() for l in text.splitlines() if l.strip()]
-        return [parse_term_def(l) for l in lines]
     return [parse_term_def(b) for b in blocks]
 
-# ---------- OCR & extraction ----------
 def ocr_space_image(image_bytes: bytes, is_pdf=False, key=None) -> str:
     key = key or os.environ.get("OCR_SPACE_API_KEY") or "helloworld"
     url = "https://api.ocr.space/parse/image"
@@ -89,27 +89,25 @@ def auto_extract(file_bytes: bytes, filename: str, api_key=None) -> str:
     else:
         return ocr_space_image(file_bytes, is_pdf=False, key=api_key)
 
-# ---------- PDF builder ----------
 def build_pdf(pairs, subject, lesson, footer_tmpl, duplex_mode="long-edge (mirrored back)",
               back_offset_x_mm=0.0, back_offset_y_mm=0.0, show_corner_marker=False):
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.colors import black, HexColor
     W, H = letter
     cols, rows = 2, 4
     card_w, card_h = W/cols, H/rows
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
-
     def guides():
         c.setStrokeColor(HexColor("#D1D5DB"))
         c.setLineWidth(0.5); c.setDash(3,3)
         c.line(card_w, 0, card_w, H)
         for y in [card_h, 2*card_h, 3*card_h]: c.line(0, y, W, y)
         c.setDash()
-
     def footer_text(idx):
         s = (footer_tmpl or "").replace("{subject}", subject or "").replace("{lesson}", lesson or "").replace("{index}", str(idx+1))
         return s.strip()
-
-    # Front pages
     for start in range(0, len(pairs), 8):
         batch = pairs[start:start+8]
         guides()
@@ -124,8 +122,6 @@ def build_pdf(pairs, subject, lesson, footer_tmpl, duplex_mode="long-edge (mirro
             if show_corner_marker:
                 c.setFillColor(HexColor("#9CA3AF")); c.circle(x0+8, y0+8, 2, fill=1, stroke=0)
         c.showPage()
-
-    # Back pages
     offx = back_offset_x_mm * 72.0/25.4
     offy = back_offset_y_mm * 72.0/25.4
     for start in range(0, len(pairs), 8):
@@ -134,14 +130,13 @@ def build_pdf(pairs, subject, lesson, footer_tmpl, duplex_mode="long-edge (mirro
         if duplex_mode.lower().startswith("short"):
             c.translate(W, H); c.rotate(180)
         for i, (_, definition) in enumerate(batch):
-            # mirrored columns for long-edge mirrored
             if "mirrored" in duplex_mode.lower():
-                row, col = i // cols, i % cols
-                col = (cols-1) - col
-                j = row*cols + col
+                row, col = i // 2, i % 2
+                col = 1 - col
+                j = row*2 + col
             else:
                 j = i
-            col, row = j % cols, j // cols
+            col, row = j % 2, j // 2
             x0, y0 = col*card_w + offx, H - (row+1)*card_h + offy
             c.setFillColor(black); c.setFont("Helvetica", 14)
             from textwrap import wrap
@@ -157,22 +152,18 @@ def build_pdf(pairs, subject, lesson, footer_tmpl, duplex_mode="long-edge (mirro
     c.save()
     return buf.getvalue()
 
-# ---------- App state ----------
 st.session_state.setdefault("extracted_text","")
 st.session_state.setdefault("manual_text","")
 st.session_state.setdefault("pairs", [])
 st.session_state.setdefault("sheet_df", pd.DataFrame(columns=["Term","Definition"]))
 st.session_state.setdefault("step", 1)
 
-# ---------- Step 1 ----------
 st.header("1) Upload or paste your list")
-t1, t2, t3 = st.tabs(["Paste text", "Upload screenshot/PDF", "Paste from sheet (grid)"])
+t1, t2 = st.tabs(["Paste text", "Upload screenshot/PDF"])
 
 with t1:
-    default_example = ("1. munch - to chew food loudly and\n"
-                       "completely\n"
-                       "2) bellowed — to have shouted in a loud\n"
-                       "deep voice")
+    default_example = ("abhor (v.) to hate, detest (Because he always wound up kicking himself in the head when he tried to play soccer, Oswald began to abhor the sport.)\n"
+                       "abide 1. (v.) to put up with (Though he did not agree with the decision, Chuck decided to abide by it.) 2. (v.) to remain (Despite the beating they've taken from the weather throughout the millennia, the mountains abide.)")
     st.session_state.manual_text = st.text_area("Your list", value=st.session_state.get("manual_text") or default_example, height=200)
 
 with t2:
@@ -188,62 +179,12 @@ with t2:
     st.session_state.extracted_text = extracted or st.session_state.get("extracted_text","")
     st.text_area("Extracted text (you can edit before parsing):", value=st.session_state.extracted_text, height=180, key="extracted_text_box")
 
-with t3:
-    st.caption("Option A: paste two columns (Term, Definition). Option B: upload a CSV/Excel and map columns.")
-    cfg = {
-        "Term": st.column_config.TextColumn(label="Front of Flash Card (term)"),
-        "Definition": st.column_config.TextColumn(label="Back of Flash Card (definition)"),
-    }
-    if st.session_state.sheet_df.empty:
-        st.session_state.sheet_df = pd.DataFrame([{"Term":"","Definition":""}])
-    grid_df = st.data_editor(st.session_state.sheet_df, num_rows="dynamic", use_container_width=True,
-                             column_config=cfg, key="grid_paste_editor")
-    st.session_state.sheet_df = grid_df
-    st.markdown("---")
-    up2 = st.file_uploader("Upload CSV or Excel", type=["csv","xlsx","xls"], key="grid_uploader")
-    if up2 is not None:
-        ext = up2.name.lower().split(".")[-1]
-        has_header = st.checkbox("First row contains headers", value=True, key="grid_has_header")
-        if ext=="csv":
-            df_raw = pd.read_csv(up2, header=0 if has_header else None)
-        else:
-            xls = pd.ExcelFile(up2)
-            sheet_name = st.selectbox("Sheet", xls.sheet_names, key="grid_sheet_select")
-            df_raw = pd.read_excel(up2, sheet_name=sheet_name, header=0 if has_header else None, engine="openpyxl")
-        if not has_header:
-            df_raw.columns = [f"Column {i+1}" for i in range(df_raw.shape[1])]
-        cols = list(df_raw.columns)
-        if cols:
-            term_col = st.selectbox("Which column is the Term (front)?", cols, index=0, key="grid_term_col")
-            def_col  = st.selectbox("Which column is the Definition (back)?", cols, index=1 if len(cols)>1 else 0, key="grid_def_col")
-            df_map = df_raw[[term_col, def_col]].rename(columns={term_col:"Term", def_col:"Definition"})
-            df_map["Term"] = df_map["Term"].astype(str).str.strip()
-            df_map["Definition"] = df_map["Definition"].astype(str).str.strip()
-            st.dataframe(df_map.head(8), use_container_width=True)
-            c1,c2 = st.columns(2)
-            if c1.button("Load into grid (replace)", key="grid_load_replace"):
-                st.session_state.sheet_df = df_map.copy(); st.success("Loaded into grid."); st.rerun()
-            if c2.button("Append to grid", key="grid_load_append"):
-                st.session_state.sheet_df = pd.concat([st.session_state.sheet_df, df_map], ignore_index=True); st.success("Appended."); st.rerun()
-
 if st.button("Next: Review and edit", type="primary"):
-    # prefer grid data
-    df = st.session_state.sheet_df.copy()
-    if not df.empty:
-        df["Term"] = df["Term"].astype(str).str.strip()
-        df["Definition"] = df["Definition"].astype(str).str.strip()
-        df_valid = df[(df["Term"]!="") | (df["Definition"]!="")]
-    else:
-        df_valid = pd.DataFrame(columns=["Term","Definition"])
-    if len(df_valid):
-        st.session_state.pairs = list(df_valid.itertuples(index=False, name=None))
-    else:
-        src = st.session_state.get("extracted_text_box") or st.session_state.get("manual_text") or ""
-        st.session_state.pairs = parse_pairs_from_text(src)
+    src = st.session_state.get("extracted_text_box") or st.session_state.get("manual_text") or ""
+    st.session_state.pairs = parse_pairs_from_text(src)
     st.session_state.step = 2
     st.rerun()
 
-# ---------- Step 2 & 3 ----------
 if st.session_state.get("step",1) >= 2:
     st.header("2) Review and edit")
     pairs = st.session_state.get("pairs", [])
@@ -264,13 +205,11 @@ if st.session_state.get("step",1) >= 2:
         byo = st.number_input("Back page offset Y (mm)", value=0.0, step=0.5)
         corner_marker = st.checkbox("Show tiny corner marker", value=False)
 
-    # Footer: always editable; toggle include
     st.subheader("Card footer (subject • lesson)")
     include_footer = st.checkbox("Include footer text on cards", value=True, key="footer_include")
     subject = st.text_input("Subject", value=st.session_state.get("footer_subject",""))
     lesson  = st.text_input("Lesson",  value=st.session_state.get("footer_lesson",""))
     templ   = st.text_input("Footer template", value=st.session_state.get("footer_template","{subject} • {lesson}"))
-    # persist
     st.session_state["footer_subject"] = subject
     st.session_state["footer_lesson"] = lesson
     st.session_state["footer_template"] = templ
