@@ -1,6 +1,6 @@
 
-import io, re, textwrap
-from typing import Optional
+import io, re
+from typing import Optional, List, Tuple
 import streamlit as st
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -36,7 +36,7 @@ def draw_cut_grid(c):
 def compose_marker(idx:int, subject:Optional[str], lesson:Optional[str]) -> str:
     parts = []
     if subject: parts.append(str(subject).strip())
-    if lesson: parts.append(str(lesson).strip())   # removed 'L' prefix
+    if lesson: parts.append(str(lesson).strip())
     parts.append(f"#{idx+1}")
     return " ".join(parts)
 
@@ -76,7 +76,6 @@ def layout_front(c, batch, start_index, visuals_mode="None", show_marker=True,
         c.setFont("Helvetica-Bold", 13); c.setFillColor(colors.black)
         c.drawCentredString(xc, yc-18, term)
 
-        # Optional subtext under the term
         if show_subtext and (subtext_tmpl.strip() or subject or lesson):
             sub = (subtext_tmpl or "{subject} • {lesson}").format(
                 subject=subject or "", lesson=lesson or "", index=idx+1
@@ -111,12 +110,10 @@ def layout_back(c, batch, start_index, long_edge=True, offset_mm=(0,0),
         else:
             lines = wrap_lines(definition, CARD_W-24, "Helvetica", 11)
             c.setFont("Helvetica", 11); c.setFillColor(colors.black)
-            # vertically center block
             start_y = yc + (len(lines)-1)*7
             y = start_y
             for line in lines:
-                c.drawCentredString(xc, y, line)
-                y -= 14
+                c.drawCentredString(xc, y, line); y -= 14
 
         if show_subtext_on_back and (subtext_tmpl.strip() or subject or lesson):
             sub = (subtext_tmpl or "{subject} • {lesson}").format(
@@ -156,36 +153,49 @@ def build_pdf(pairs, title="Flashcards", long_edge=True, offset_mm=(0,0),
     c.save()
     return buf.getvalue()
 
-# ---------------- Robust parsing ----------------
+# ---------------- Parsing helpers ----------------
 SEP_PATTERN = re.compile(
-    r"""^\s*                          # start
-        (?:\d+[\.\)]\s*)?             # optional leading '1.' or '1)' numbering
-        (?:[\-\u2022]\s*)?            # optional bullet '- ' or '• '
-        (?P<term>.+?)                  # the term (minimal)
-        \s*(?:[-\u2013\u2014:])\s+     # a separator: hyphen, en dash, em dash, or colon
-        (?P<def>.+)                    # the definition (greedy to end)
-        \s*$                           # end
-    """,
-    re.VERBOSE
+    r"""^\s*
+        (?:\d+[\.\)]\s*)?            # optional numbering like '1.' or '2)'
+        (?:[•\-]\s*)?                # optional bullet
+        (?P<term>.+?)                # the term
+        \s*(?:[-\u2013\u2014:])\s+   # hyphen/en dash/em dash/colon
+        (?P<def>.+)                  # definition
+        \s*$
+    """, re.VERBOSE
 )
+START_ITEM = re.compile(r'^\s*(\d+[\.\)]\s*|[•\-]\s+)')  # start of a new item (number/bullet)
 
-def parse_text_to_pairs(txt: str, mode: str):
-    pairs=[]
-    for raw in txt.strip().splitlines():
-        line = raw.strip()
-        if not line: 
-            continue
-        if mode=="terms":
-            m = SEP_PATTERN.match(line)
-            if m:
-                term = m.group("term").strip()
-                definition = m.group("def").strip()
-                pairs.append((term, definition, None))
-            else:
-                # fallback: treat whole line as term (no def)
-                pairs.append((line, "", None))
+def clean_lines(raw_text: str) -> List[str]:
+    # Keep non-empty lines only
+    return [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
+
+def parse_text_to_pairs(txt: str, mode: str) -> List[Tuple[str,str,Optional[str]]]:
+    lines = clean_lines(txt)
+    pairs: List[Tuple[str,str,Optional[str]]] = []
+    if mode != "terms":
+        return [(ln, "", None) for ln in lines]
+
+    last_idx = -1
+    for ln in lines:
+        m = SEP_PATTERN.match(ln)
+        if m:
+            term = m.group("term").strip()
+            definition = m.group("def").strip()
+            pairs.append((term, definition, None))
+            last_idx = len(pairs) - 1
         else:
-            pairs.append((line, "", None))
+            # Heuristic: if no separator and we have a previous pair,
+            # treat this as a **continuation** of the previous definition
+            # (common with OCR-wrapped lines like "completely", "deep voice").
+            if last_idx >= 0:
+                prev_term, prev_def, meta = pairs[last_idx]
+                joiner = "" if prev_def.endswith(('-', '–', '—')) else " "
+                pairs[last_idx] = (prev_term, (prev_def + joiner + ln).strip(), meta)
+            else:
+                # No previous item; reluctantly treat as a standalone term.
+                pairs.append((ln, "", None))
+                last_idx = len(pairs) - 1
     return pairs
 
 # ---------------- OCR helpers ----------------
@@ -237,9 +247,9 @@ with st.sidebar:
     show_marker = st.checkbox("Show corner marker", value=True)
     st.markdown("---")
     st.subheader("Subject / Lesson")
-    subject = st.text_input("Subject (optional)", value="", placeholder="e.g., Science or ELA")
-    lesson = st.text_input("Lesson (optional)", value="", placeholder="e.g., Unit 1-4")
-    show_subtext = st.checkbox("Show subtext under term (FRONT)", value=False)  # default OFF now
+    subject = st.text_input("Subject (optional)", value="", placeholder="e.g., ELA, Science")
+    lesson = st.text_input("Lesson (optional)", value="", placeholder="e.g., Unit 1 Week 1")
+    show_subtext = st.checkbox("Show subtext under term (FRONT)", value=False)
     subtext_tmpl = st.text_input("Subtext template", value="{subject} • {lesson}", help="Use {subject}, {lesson}, {index}")
     show_subtext_on_back = st.checkbox("Also show subtext on BACK", value=False)
     st.markdown("---")
@@ -249,12 +259,12 @@ with st.sidebar:
     st.markdown("---")
     visuals_mode = st.selectbox("Front visuals", ["None", "Initials badge"], index=0)
 
-st.write("Paste or upload your list. For **terms mode**, separators like '-', '–', '—', or ':' are supported.\nExamples: `munch - to chew...`, `Brain — control center...`, `1) heart: pumps blood`.")
+st.write("Paste or upload your list. For **terms mode**, separators like '-', '–', '—', or ':' are supported.\nNumbered/bulleted lists are ok (e.g., '1. term - def').")
 
 tab1, tab2 = st.tabs(["Paste text", "Upload screenshot/PDF"])
 
 with tab1:
-    default_example = "munch - to chew food loudly and completely\nbellowed - to have shouted in a loud deep voice\nrough - when you do something in a way that is not gentle."
+    default_example = "1. munch- to chew food loudly and\ncompletely\n2. bellowed- to have shouted in a loud\ndeep voice\n3. rough- when you do something in a way that is not gentle."
     text_input_area = st.text_area("Your list:", value=default_example, height=220, key="manual_text")
 
 with tab2:
