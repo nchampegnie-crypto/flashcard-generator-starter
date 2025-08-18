@@ -2,3 +2,4 @@ streamlit
 reportlab
 pdfplumber
 requests
+pandas
