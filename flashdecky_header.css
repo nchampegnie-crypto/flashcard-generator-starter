@@ -45,3 +45,42 @@ textarea, input, [role="combobox"] {
   color: #4B5563 !important;
   opacity: 1 !important;
 }
+
+/* ---- v3.1.4: light input fields ---- */
+
+/* Text inputs */
+[data-testid="stTextInput"] > div > div,
+[data-baseweb="input"] {
+  background: #FFFFFF !important;
+  border: 1px solid #E5E7EB !important;
+  border-radius: 10px !important;
+}
+[data-testid="stTextInput"] input,
+[data-baseweb="input"] input {
+  background: #F9FAFB !important;
+  color: #111827 !important;
+}
+
+/* Textareas */
+[data-testid="stTextArea"] > div {
+  background: #FFFFFF !important;
+  border: 1px solid #E5E7EB !important;
+  border-radius: 10px !important;
+}
+[data-testid="stTextArea"] textarea {
+  background: #F9FAFB !important;
+  color: #111827 !important;
+}
+
+/* File uploader label text (ensure readable) */
+[data-testid="stFileUploader"] * { color: #111827 !important; }
+
+/* Focus ring */
+textarea:focus, input:focus, [data-baseweb="input"] input:focus {
+  outline: none !important;
+  border-color: #6C63FF !important;
+  box-shadow: 0 0 0 3px rgba(108, 99, 255, 0.12) !important;
+}
+
+/* Placeholder color */
+::placeholder { color: #6B7280 !important; opacity: 1 !important; }
