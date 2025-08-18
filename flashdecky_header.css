@@ -3,7 +3,7 @@
 [data-testid="stAppViewContainer"], [data-testid="stSidebar"]{ background:#FFFFFF !important; color:#111827 !important; }
 h1,h2,h3,h4,h5,h6, [data-testid="stMarkdownContainer"] *{ color:#111827 !important; }
 .block-container{padding-top:1.25rem;}
-/* Light inputs */
+/* light inputs */
 [data-testid="stTextInput"]>div>div, [data-baseweb="input"], [data-testid="stTextArea"]>div{
   background:#FFFFFF !important; border:1px solid #E5E7EB !important; border-radius:10px !important;
 }
@@ -14,7 +14,7 @@ textarea:focus,input:focus,[data-baseweb="input"] input:focus{
   outline:none !important;border-color:#6C63FF !important; box-shadow:0 0 0 3px rgba(108,99,255,.12) !important;
 }
 ::placeholder{color:#6B7280 !important;opacity:1 !important;}
-/* File uploader light */
+/* file uploader */
 [data-testid="stFileUploader"]{color:#111827 !important;}
 [data-testid="stFileUploaderDropzone"], [data-testid="stFileUploader"] section[data-testid="stFileUploaderDropzone"]{
   background:#FFFFFF !important;border:1px solid #E5E7EB !important;border-radius:12px !important;
