@@ -9,11 +9,13 @@ from reportlab.lib import colors
 import pandas as pd
 import requests
 
+# Optional PDF text extractor
 try:
     import pdfplumber
 except Exception:
     pdfplumber = None
 
+# ---------- Robust asset loading ----------
 APP_DIR = Path(__file__).parent
 ASSETS = APP_DIR / "assets"
 
@@ -31,11 +33,14 @@ css_path = APP_DIR / "flashdecky_header.css"
 if css_path.exists():
     st.markdown(f"<style>{css_path.read_text()}</style>", unsafe_allow_html=True)
 
+# Header (extra space div avoids clipping on some themes)
+st.markdown('<div class="fd-header-space"></div>', unsafe_allow_html=True)
 c1, c2 = st.columns([1,5])
 with c1: safe_image(ASSETS / "icon.png", width=64)
 with c2: safe_image(ASSETS / "wordmark.png", width=360)
 st.markdown("<hr/>", unsafe_allow_html=True)
 
+# ---------- Steps ----------
 st.session_state.setdefault("step", 1)
 st.session_state.setdefault("pairs", [])
 st.session_state.setdefault("extracted_text", "")
@@ -46,6 +51,7 @@ with st.sidebar:
     for i, label in enumerate(steps, start=1):
         st.write(("✅ " if st.session_state.step>i else "➡️ " if st.session_state.step==i else "○ ") + label)
 
+# ---------- Extraction helpers ----------
 OCR_SPACE_ENDPOINT = "https://api.ocr.space/parse/image"
 
 def ocr_space_extract(file_bytes: bytes, is_pdf=False, api_key: Optional[str]=None, retries=3, backoff=1.3) -> Optional[str]:
@@ -88,6 +94,7 @@ def auto_extract(file_bytes: bytes, filename: str, api_key: Optional[str]) -> st
     else:
         return ocr_space_extract(file_bytes, is_pdf=False, api_key=api_key) or ""
 
+# ---------- Parsing ----------
 SEP_PATTERN = re.compile(
     r'^\s*(?:\d+[\.\)]\s*)?(?:[•\-]\s*)?(?P<term>.+?)\s*(?:[\-\u2013\u2014:])\s+(?P<def>.+)\s*$'
 )
@@ -111,7 +118,7 @@ def parse_pairs_from_text(txt: str) -> List[Tuple[str,str]]:
                 pairs.append((ln, "")); last_idx = len(pairs)-1
     return pairs
 
-from reportlab.lib.pagesizes import letter
+# ---------- PDF generation ----------
 PAGE = letter
 COLS, ROWS = 2, 4
 CARD_W, CARD_H = PAGE[0]/COLS, PAGE[1]/ROWS
@@ -140,19 +147,33 @@ def draw_index(c, idx, xc, yc, show_marker: bool):
     c.setFont("Helvetica", 7); c.setFillColor(colors.grey)
     c.drawRightString(xc + CARD_W/2 - 6, yc - CARD_H/2 + 8, f"#{idx+1}")
 
-def layout_front(c, batch, start_index, show_marker=False):
+def draw_footer(c, text, x_right, y_bottom):
+    if not text: return
+    c.setFont("Helvetica", 8); c.setFillColor(colors.grey)
+    c.drawRightString(x_right - 6, y_bottom + 6, text)
+
+def make_footer_text(template: str, subject: str, lesson: str) -> str:
+    try:
+        return template.format(subject=subject.strip(), lesson=lesson.strip()).strip()
+    except Exception:
+        return f"{subject.strip()} • {lesson.strip()}".strip(" •")
+
+def layout_front(c, batch, start_index, show_marker=False, footer_text=None):
     for i, item in enumerate(batch):
         idx = start_index + i
         col = i % COLS; row = (i // COLS) % ROWS
-        xc = col*CARD_W + CARD_W/2
-        yc = PAGE[1] - (row*CARD_H + CARD_H/2)
+        left = col*CARD_W; bottom = PAGE[1] - (row+1)*CARD_H
+        xc = left + CARD_W/2
+        yc = bottom + CARD_H/2
         term, definition = item
         c.setFont("Helvetica-Bold", 13); c.setFillColor(colors.black)
         c.drawCentredString(xc, yc-18, term)
+        if footer_text:
+            draw_footer(c, footer_text, left + CARD_W, bottom)
         draw_index(c, idx, xc, yc, show_marker)
     draw_cut_grid(c)
 
-def layout_back(c, batch, start_index, long_edge=True, offset_mm=(0,0), spelling_mode=False, show_marker=False):
+def layout_back(c, batch, start_index, long_edge=True, offset_mm=(0,0), spelling_mode=False, show_marker=False, footer_text=None):
     ox = offset_mm[0] * 2.83465; oy = offset_mm[1] * 2.83465
     c.saveState(); c.translate(ox, oy)
     rotate180 = not long_edge
@@ -163,8 +184,9 @@ def layout_back(c, batch, start_index, long_edge=True, offset_mm=(0,0), spelling
         term, definition = item
         col = i % COLS; row = (i // COLS) % ROWS
         if long_edge: col = (COLS-1) - col
-        xc = col*CARD_W + CARD_W/2
-        yc = PAGE[1] - (row*CARD_H + CARD_H/2)
+        left = col*CARD_W; bottom = PAGE[1] - (row+1)*CARD_H
+        xc = left + CARD_W/2
+        yc = bottom + CARD_H/2
 
         if spelling_mode or not definition:
             c.setStrokeColor(colors.black)
@@ -179,35 +201,51 @@ def layout_back(c, batch, start_index, long_edge=True, offset_mm=(0,0), spelling
             for line in lines:
                 c.drawCentredString(xc, y, line); y -= 14
 
+        if footer_text:
+            draw_footer(c, footer_text, left + CARD_W, bottom)
+
         draw_index(c, start_index + i, xc, yc, show_marker)
 
     draw_cut_grid(c); c.restoreState()
 
-LONG_EDGE = True
-OFFSETS_MM = (0.0, 0.0)
-SHOW_MARKER = False
-
-def build_pdf(pairs, long_edge=LONG_EDGE, offset_mm=OFFSETS_MM, show_marker=SHOW_MARKER, spelling_mode=False, watermark=None) -> bytes:
+def build_pdf(pairs, *, long_edge=True, offset_mm=(0,0), show_marker=False, spelling_mode=False, footer_text=None) -> bytes:
     buf = io.BytesIO(); c = canvas.Canvas(buf, pagesize=PAGE)
     start = 0; sheet = 1
     while start < len(pairs):
         batch = pairs[start:start+CHUNK]
         c.setFont("Helvetica", 8); c.setFillColor(colors.grey)
         c.drawString(20, PAGE[1]-12, f"Sheet {sheet} FRONT ({'Long-edge' if long_edge else 'Short-edge'})")
-        layout_front(c, batch, start, show_marker=show_marker)
-        if watermark: c.drawString(20, 20, watermark)
+        layout_front(c, batch, start, show_marker=show_marker, footer_text=footer_text)
         c.showPage()
 
         c.setFont("Helvetica", 8); c.setFillColor(colors.grey)
         c.drawString(20, PAGE[1]-12, f"Sheet {sheet} BACK")
-        layout_back(c, batch, start, long_edge, offset_mm, spelling_mode, show_marker)
-        if watermark: c.drawString(20, 20, watermark)
+        layout_back(c, batch, start, long_edge, offset_mm, spelling_mode, show_marker, footer_text)
         c.showPage()
 
         start += CHUNK; sheet += 1
     c.save(); return buf.getvalue()
 
-# Step 1
+# ---------- UI controls (restored minimal set) ----------
+with st.expander("Print alignment", expanded=False):
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        duplex = st.radio("Duplex mode", ["Long-edge (mirror backs)", "Short-edge (rotate backs)"])
+        long_edge = duplex.startswith("Long")
+    with c2:
+        offx = st.number_input("Back alignment X (mm)", value=0.0, step=0.5, help="Shift backs RIGHT")
+        offy = st.number_input("Back alignment Y (mm)", value=0.0, step=0.5, help="Shift backs UP")
+    with c3:
+        show_marker = st.checkbox("Show corner marker", value=False)
+
+with st.expander("Card footer (subject • lesson)", expanded=False):
+    enable_footer = st.checkbox("Add footer text on cards", value=True)
+    subject = st.text_input("Subject", value="")
+    lesson = st.text_input("Lesson", value="")
+    templ = st.text_input("Footer template", value="{subject} • {lesson}")
+    footer_text = make_footer_text(templ, subject, lesson) if enable_footer else None
+
+# ---------- Step 1: Upload or paste ----------
 if st.session_state.step == 1:
     st.header("1) Upload or paste your list")
     t1, t2 = st.tabs(["Paste text", "Upload screenshot/PDF"])
@@ -221,6 +259,7 @@ if st.session_state.step == 1:
         st.caption("We’ll auto-choose the best extraction for you.")
         with st.expander("Advanced extraction options", expanded=False):
             ocr_api_key = st.text_input("OCR.space API key (optional)", type="password", help="Use your key to avoid demo limits.")
+
         if up is not None:
             file_bytes = up.read()
             with st.spinner("Extracting text…"):
@@ -236,7 +275,7 @@ if st.session_state.step == 1:
         st.session_state.step = 2
         st.rerun()
 
-# Step 2
+# ---------- Step 2: Review and edit ----------
 elif st.session_state.step == 2:
     st.header("2) Review and edit")
     pairs = st.session_state.get("pairs", [])
@@ -246,25 +285,35 @@ elif st.session_state.step == 2:
         df = pd.DataFrame(pairs, columns=["Term","Definition"]).fillna("")
         df["Term"] = df["Term"].astype(str)
         df["Definition"] = df["Definition"].astype(str)
+
         st.caption("Click a cell to edit. Add/remove rows if needed.")
         df = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="editor_simple")
         st.session_state.pairs = [(str(r.Term).strip(), str(r.Definition).strip()) for r in df.itertuples(index=False)]
+
     c1, c2 = st.columns(2)
     if c1.button("⬅ Back"):
         st.session_state.step = 1; st.rerun()
     if c2.button("Next: Generate PDF", type="primary"):
         st.session_state.step = 3; st.rerun()
 
-# Step 3
+# ---------- Step 3: Download ----------
 elif st.session_state.step == 3:
     st.header("3) Download your duplex-ready PDF")
     pairs = [(str(t or ""), str(d or "")) for t, d in st.session_state.get("pairs", [])]
     if not pairs:
         st.warning("No items to print. Go back and add a list.")
     else:
-        pdf_bytes = build_pdf(pairs=pairs)
+        pdf_bytes = build_pdf(
+            pairs=pairs,
+            long_edge=long_edge,
+            offset_mm=(offx, offy),
+            show_marker=show_marker,
+            spelling_mode=False,
+            footer_text=footer_text
+        )
         st.success("PDF ready!")
         st.download_button("⬇ Download cards PDF", data=pdf_bytes, file_name="FlashDecky_cards.pdf", mime="application/pdf", type="primary")
+
         c1, c2 = st.columns(2)
         if c1.button("⬅ Back"):
             st.session_state.step = 2; st.rerun()

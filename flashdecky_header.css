@@ -1,4 +1,9 @@
 
 :root { --brand-indigo:#6C63FF; --brand-gold:#FFB703; --brand-text:#111827; --brand-bg:#FFFFFF; }
-.block-container { padding-top: 1.0rem; }
+[data-testid="stAppViewContainer"],
+section.main .block-container,
+[data-testid="stHeader"],
+[data-testid="stSidebar"] { background:#FFFFFF !important; }
+.block-container { padding-top: 1.75rem; }
+.fd-header-space { height: 6px; } /* prevent logo clipping */
 .footer-cta { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #eee; padding: 10px 0; z-index: 999; margin-top: 12px; }
