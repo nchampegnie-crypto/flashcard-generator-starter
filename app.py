@@ -11,6 +11,7 @@ st.set_page_config(page_title="FlashDecky", page_icon="⚡", layout="wide")
 with open("flashdecky_header.css","r") as f:
     st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
+# Header
 c1, c2 = st.columns([1,6])
 with c1: st.image("assets/icon.png", width=56)
 with c2: st.image("assets/wordmark.png", use_column_width=False)
@@ -20,6 +21,7 @@ with st.sidebar:
     st.header("Progress")
     st.markdown("1) Upload/Paste  \n2) Review and edit  \n3) Download PDF")
 
+# ================= Parsing helpers ==================
 LIST_START_RE = re.compile(r"(?mi)^\s*(?:\d+[\.\)]\s+|[-*•]\s+)")
 HEADWORD_START_RE = re.compile(r"(?:(?<=^)|(?<=\n)|(?<=\)))\s*([A-Za-z][A-Za-z'’\-]+)(?=\s+(?:\(|\d+\.))")
 
@@ -91,9 +93,7 @@ def auto_extract(file_bytes: bytes, filename: str, api_key=None) -> str:
 
 def build_pdf(pairs, subject, lesson, footer_tmpl, duplex_mode="long-edge (mirrored back)",
               back_offset_x_mm=0.0, back_offset_y_mm=0.0, show_corner_marker=False):
-    from reportlab.lib.pagesizes import letter
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.colors import black, HexColor
+    from textwrap import wrap
     W, H = letter
     cols, rows = 2, 4
     card_w, card_h = W/cols, H/rows
@@ -139,7 +139,6 @@ def build_pdf(pairs, subject, lesson, footer_tmpl, duplex_mode="long-edge (mirro
             col, row = j % 2, j // 2
             x0, y0 = col*card_w + offx, H - (row+1)*card_h + offy
             c.setFillColor(black); c.setFont("Helvetica", 14)
-            from textwrap import wrap
             y = y0 + card_h/2 + 10
             for line in wrap(definition, 60):
                 c.drawCentredString(x0+card_w/2, y, line); y -= 16
@@ -152,14 +151,16 @@ def build_pdf(pairs, subject, lesson, footer_tmpl, duplex_mode="long-edge (mirro
     c.save()
     return buf.getvalue()
 
+# ============== Session state ==============
 st.session_state.setdefault("extracted_text","")
 st.session_state.setdefault("manual_text","")
 st.session_state.setdefault("pairs", [])
 st.session_state.setdefault("sheet_df", pd.DataFrame(columns=["Term","Definition"]))
 st.session_state.setdefault("step", 1)
 
+# ============== Step 1: Inputs ==============
 st.header("1) Upload or paste your list")
-t1, t2 = st.tabs(["Paste text", "Upload screenshot/PDF"])
+t1, t2, t3 = st.tabs(["Paste text","Upload screenshot/PDF","Spreadsheet / Paste table"])
 
 with t1:
     default_example = ("abhor (v.) to hate, detest (Because he always wound up kicking himself in the head when he tried to play soccer, Oswald began to abhor the sport.)\n"
@@ -167,7 +168,7 @@ with t1:
     st.session_state.manual_text = st.text_area("Your list", value=st.session_state.get("manual_text") or default_example, height=200)
 
 with t2:
-    up = st.file_uploader("Upload image or PDF", type=["png","jpg","jpeg","pdf"])
+    up = st.file_uploader("Upload image or PDF", type=["png","jpg","jpeg","pdf"], key="uploader_ocr")
     st.caption("We’ll auto-choose the best extraction for you.")
     extracted = st.session_state.get("extracted_text","")
     if up is not None:
@@ -179,15 +180,58 @@ with t2:
     st.session_state.extracted_text = extracted or st.session_state.get("extracted_text","")
     st.text_area("Extracted text (you can edit before parsing):", value=st.session_state.extracted_text, height=180, key="extracted_text_box")
 
+with t3:
+    st.write("**Option A: Upload CSV or Excel** (two columns: Term, Definition)")
+    up_sheet = st.file_uploader("Spreadsheet", type=["csv","xlsx"], key="uploader_sheet")
+    df_sheet = st.session_state.get("sheet_df", pd.DataFrame(columns=["Term","Definition"]))
+    if up_sheet is not None:
+        try:
+            if up_sheet.name.lower().endswith(".csv"):
+                df_sheet = pd.read_csv(up_sheet)
+            else:
+                df_sheet = pd.read_excel(up_sheet)
+        except Exception:
+            st.error("Could not read that file. Make sure it has two columns.")
+    st.write("**Option B: Paste a table** (e.g., copy from Google Sheets / Excel)")
+    pasted_table = st.text_area("Paste table data here (it will try to auto-detect separators)", height=120, key="pasted_table")
+    if pasted_table.strip():
+        import pandas as pd, io
+        try:
+            df_table = pd.read_csv(io.StringIO(pasted_table), sep=None, engine='python')
+            df_sheet = df_table
+        except Exception:
+            pass
+    if not df_sheet.empty:
+        cols_lower = [c.lower() for c in df_sheet.columns]
+        if "term" in cols_lower and "definition" in cols_lower:
+            df_sheet = df_sheet.rename(columns={df_sheet.columns[cols_lower.index("term")]: "Term",
+                                                df_sheet.columns[cols_lower.index("definition")]: "Definition"})
+        else:
+            first_two = df_sheet.columns[:2]
+            df_sheet = df_sheet.rename(columns={first_two[0]:"Term", first_two[1]:"Definition"})
+        st.dataframe(df_sheet[["Term","Definition"]], use_container_width=True)
+    st.session_state["sheet_df"] = df_sheet
+
 if st.button("Next: Review and edit", type="primary"):
-    src = st.session_state.get("extracted_text_box") or st.session_state.get("manual_text") or ""
-    st.session_state.pairs = parse_pairs_from_text(src)
+    pairs = []
+    if not st.session_state.get("sheet_df", pd.DataFrame()).empty:
+        df = st.session_state["sheet_df"]
+        for _, r in df.iterrows():
+            term = str(r.get("Term","")).strip()
+            definition = str(r.get("Definition","")).strip()
+            if term or definition:
+                pairs.append((term, definition))
+    else:
+        src = st.session_state.get("extracted_text_box") or st.session_state.get("manual_text") or ""
+        pairs = parse_pairs_from_text(src)
+    st.session_state.pairs = pairs
     st.session_state.step = 2
     st.rerun()
 
 if st.session_state.get("step",1) >= 2:
     st.header("2) Review and edit")
     pairs = st.session_state.get("pairs", [])
+    import pandas as pd
     df = pd.DataFrame(pairs, columns=["Term","Definition"]).fillna("")
     cfg2 = {
         "Term": st.column_config.TextColumn(label="Front of Flash Card (term)"),
@@ -207,9 +251,9 @@ if st.session_state.get("step",1) >= 2:
 
     st.subheader("Card footer (subject • lesson)")
     include_footer = st.checkbox("Include footer text on cards", value=True, key="footer_include")
-    subject = st.text_input("Subject", value=st.session_state.get("footer_subject",""))
-    lesson  = st.text_input("Lesson",  value=st.session_state.get("footer_lesson",""))
-    templ   = st.text_input("Footer template", value=st.session_state.get("footer_template","{subject} • {lesson}"))
+    subject = st.text_input("Subject", value=st.session_state.get("footer_subject",""), disabled=not include_footer, key="subject_field")
+    lesson  = st.text_input("Lesson",  value=st.session_state.get("footer_lesson",""), disabled=not include_footer, key="lesson_field")
+    templ   = st.text_input("Footer template", value=st.session_state.get("footer_template","{subject} • {lesson}"), disabled=not include_footer, key="templ_field")
     st.session_state["footer_subject"] = subject
     st.session_state["footer_lesson"] = lesson
     st.session_state["footer_template"] = templ
