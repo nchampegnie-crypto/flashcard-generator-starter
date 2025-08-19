@@ -1,0 +1,16 @@
+
+:root{
+  --brand-indigo:#6C63FF;
+  --brand-gold:#FFB703;
+  --brand-text:#111827;
+  --brand-bg:#FFFFFF;
+}
+html, body, .stApp, .block-container { background:#FFFFFF !important; color:#111827 !important; }
+.stTabs [data-baseweb="tab"] { color:#111827 !important; padding:6px 12px !important; }
+.stTabs [aria-selected="true"] { background:#EEF2FF !important; border-radius:8px !important; }
+.stSelectbox div[data-baseweb="select"] div { color:#111827 !important; }
+div[data-baseweb="menu"] div[role="option"] { color:#111827 !important; }
+.stTextInput input, .stTextArea textarea, .stNumberInput input, .stFileUploader, .stDataFrame { background:#FFFFFF !important; color:#111827 !important; }
+.streamlit-expanderHeader { background:#F3F4F6 !important; color:#111827 !important; }
+.streamlit-expanderContent { background:#FFFFFF !important; color:#111827 !important; }
+.katex-html { color:#111827 !important; }
