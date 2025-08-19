@@ -1,12 +1,4 @@
 
-:root{ --brand-indigo:#6C63FF; --brand-gold:#FFB703; --brand-text:#111827; --brand-bg:#FFFFFF; }
-[data-testid="stAppViewContainer"], [data-testid="stSidebar"]{ background:#FFFFFF !important; color:#111827 !important; }
-.block-container{padding-top:1.25rem;}
-[data-testid="stTextInput"]>div>div, [data-baseweb="input"], [data-testid="stTextArea"]>div{
-  background:#FFFFFF !important; border:1px solid #E5E7EB !important; border-radius:12px !important;
-}
-[data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea, [data-baseweb="input"] input{
-  background:#F9FAFB !important; color:#111827 !important;
-}
-::placeholder{color:#6B7280 !important;}
-[data-testid="stFileUploaderDropzone"]{ background:#FFFFFF !important;border:1px solid #E5E7EB !important;border-radius:12px !important; }
+:root { --brand-indigo:#6C63FF; --brand-gold:#FFB703; --brand-text:#111827; --brand-bg:#FFFFFF; }
+.block-container { padding-top: 1.0rem; }
+.footer-cta { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #eee; padding: 10px 0; z-index: 999; margin-top: 12px; }
